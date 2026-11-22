@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "meet-agent brain protocol",
+  "description": "JSON messages over a local WebSocket between the Rust orchestrator and the Python brain server. One message per WebSocket text frame. Rust types: crates/brain-client/src/protocol.rs.",
+  "$defs": {
+    "think": {
+      "description": "Rust → Python: ask for the next action and what to say.",
+      "type": "object",
+      "required": ["cmd", "id", "text", "state", "allowed"],
+      "properties": {
+        "cmd": { "const": "think" },
+        "id": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" },
+        "state": { "type": "string" },
+        "allowed": { "type": "array", "items": { "type": "string" } },
+        "image": { "type": "string", "description": "Path to a screenshot, only for questions about the screen." }
+      }
+    },
+    "cancel": {
+      "description": "Rust → Python: stop working on a request.",
+      "type": "object",
+      "required": ["cmd", "id"],
+      "properties": { "cmd": { "const": "cancel" }, "id": { "type": "integer" } }
+    },
+    "ready": {
+      "description": "Python → Rust: the model is loaded.",
+      "type": "object",
+      "required": ["event", "model"],
+      "properties": { "event": { "const": "ready" }, "model": { "type": "string" } }
+    },
+    "sentence": {
+      "description": "Python → Rust: one finished sentence, sent early so speech can start.",
+      "type": "object",
+      "required": ["event", "id", "text"],
+      "properties": { "event": { "const": "sentence" }, "id": { "type": "integer" }, "text": { "type": "string" } }
+    },
+    "reply": {
+      "description": "Python → Rust: the complete reply.",
+      "type": "object",
+      "required": ["event", "id", "action", "say"],
+      "properties": { "event": { "const": "reply" }, "id": { "type": "integer" }, "action": { "type": "string" }, "say": { "type": "string" } }
+    },
+    "error": {
+      "description": "Python → Rust: the request failed.",
+      "type": "object",
+      "required": ["event", "message"],
+      "properties": { "event": { "const": "error" }, "id": { "type": ["integer", "null"] }, "message": { "type": "string" } }
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/think" }, { "$ref": "#/$defs/cancel" },
+    { "$ref": "#/$defs/ready" }, { "$ref": "#/$defs/sentence" },
+    { "$ref": "#/$defs/reply" }, { "$ref": "#/$defs/error" }
+  ]
+}

@@ -1,0 +1,31 @@
+# Settings for meet-agent. Paths starting with ~/ are expanded.
+
+[paths]
+hf_cache = "~/.cache/huggingface/hub"
+runs = "runs"
+
+[chrome]
+binary = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+profile_dir = "~/meet-agent-chrome"   # holds the agent's Google sign-in; never your personal profile
+debug_port = 9222                     # bound to 127.0.0.1 only
+
+[audio]
+call_input = "BlackHole 16ch"         # Meet's speaker → the agent hears the call
+agent_output = "BlackHole 2ch"        # the agent's voice → Meet's microphone
+monitor_output = ""                   # your headphones; empty = system default output
+
+[brain]
+model = "mlx-community/Qwen3-VL-8B-Instruct-4bit"
+port = 8790
+startup_timeout_secs = 120
+
+[meet]
+admit_timeout_secs = 300              # give up if nobody admits the agent
+
+# Role → Hugging Face repo (the brain is set above). Whisper and Kokoro switch to
+# GGML / ONNX files in Phase 2b.
+[models]
+vad = "onnx-community/silero-vad"
+smart_turn = "pipecat-ai/smart-turn-v3"
+whisper = "mlx-community/whisper-large-v3-turbo"
+tts = "hexgrad/Kokoro-82M"
