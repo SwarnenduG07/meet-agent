@@ -97,7 +97,7 @@ pub fn run(cfg: &Config) -> usize {
     r.check(
         expand(&cfg.chrome.profile_dir).is_dir(),
         &format!("agent profile at {}", cfg.chrome.profile_dir),
-        "`just login` arrives in Phase 1: it opens this profile so you sign in to the agent's Google account once",
+        "run `just login` and sign in to the agent's Google account once",
     );
 
     println!();

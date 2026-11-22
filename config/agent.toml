@@ -8,10 +8,12 @@ runs = "runs"
 binary = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 profile_dir = "~/meet-agent-chrome"   # holds the agent's Google sign-in; never your personal profile
 debug_port = 9222                     # bound to 127.0.0.1 only
+share_source = "Screen 1"             # "Screen 1" / "Screen 2" with two displays, "Entire screen" with one
 
 [audio]
 call_input = "BlackHole 16ch"         # Meet's speaker → the agent hears the call
 agent_output = "BlackHole 2ch"        # the agent's voice → Meet's microphone
+meet_speaker = "Meet Output"          # Multi-Output device: your headphones + BlackHole 16ch
 monitor_output = ""                   # your headphones; empty = system default output
 
 [brain]
@@ -20,6 +22,7 @@ port = 8790
 startup_timeout_secs = 120
 
 [meet]
+labels = "config/meet-labels.toml"     # Meet button labels
 admit_timeout_secs = 300              # give up if nobody admits the agent
 
 # Role → Hugging Face repo (the brain is set above). Whisper and Kokoro switch to

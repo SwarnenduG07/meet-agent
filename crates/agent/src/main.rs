@@ -2,6 +2,8 @@
 
 mod config;
 mod doctor;
+mod join;
+mod login;
 
 use std::path::PathBuf;
 
@@ -25,7 +27,19 @@ enum Cmd {
     /// Open the agent's Chrome profile so you can sign in to Google once.
     Login,
     /// Join a meeting, share the screen, then leave. No AI (Phase 1 test).
-    Join { link: String },
+    Join {
+        /// Meet link, e.g. <https://meet.google.com/abc-defg-hij>.
+        link: String,
+        /// Open the green room and list Meet's buttons, without joining.
+        #[arg(long)]
+        dry_run: bool,
+        /// Share the entire screen once in the call, then stop before leaving.
+        #[arg(long)]
+        share: bool,
+        /// Seconds to stay in the call (or to keep sharing) before leaving.
+        #[arg(long, default_value_t = 20)]
+        stay: u64,
+    },
     /// Voice loop with your mic and speakers, no Meet (Phase 2b test).
     Listen,
     /// Run a full meeting from a brief.
@@ -42,7 +56,19 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Cmd::Login | Cmd::Join { .. } => bail!("not built yet: Phase 1 (meet crate)"),
+        Cmd::Login => login::run(&cfg),
+        Cmd::Join {
+            link,
+            dry_run,
+            share,
+            stay,
+        } => tokio::runtime::Runtime::new()?.block_on(join::run(
+            &cfg,
+            &link,
+            dry_run,
+            share,
+            std::time::Duration::from_secs(stay),
+        )),
         Cmd::Listen => bail!("not built yet: Phase 2b (audio + speech crates)"),
         Cmd::Run { .. } => bail!("not built yet: Phase 3 (orchestrator)"),
     }

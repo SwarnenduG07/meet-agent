@@ -22,3 +22,7 @@ models:
 # Python prototype: talk to the agent with your mic (wear headphones)
 prototype:
     cd prototype && uv run -q --python 3.12 {{proto_deps}} python voice_loop.py
+
+# Open the agent's Chrome profile to sign in to its Google account once
+login:
+    cargo run -q -p agent -- login

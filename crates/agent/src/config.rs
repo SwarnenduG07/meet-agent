@@ -15,6 +15,7 @@ pub struct Config {
     pub chrome: Chrome,
     pub audio: Audio,
     pub brain: Brain,
+    pub meet: Meet,
     /// Role → Hugging Face repo, e.g. `vad = "onnx-community/silero-vad"`.
     pub models: BTreeMap<String, String>,
 }
@@ -29,12 +30,20 @@ pub struct Chrome {
     pub binary: String,
     pub profile_dir: String,
     pub debug_port: u16,
+    pub share_source: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Audio {
     pub call_input: String,
     pub agent_output: String,
+    pub meet_speaker: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Meet {
+    pub labels: String,
+    pub admit_timeout_secs: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +53,16 @@ pub struct Brain {
 }
 
 impl Config {
+    /// The agent's Chrome: binary, profile and control port.
+    pub fn chrome(&self) -> meet::chrome::Chrome {
+        meet::chrome::Chrome {
+            binary: self.chrome.binary.clone().into(),
+            profile_dir: expand(&self.chrome.profile_dir),
+            debug_port: self.chrome.debug_port,
+            share_source: self.chrome.share_source.clone(),
+        }
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let text =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
