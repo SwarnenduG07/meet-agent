@@ -3,7 +3,11 @@
 A local agent that joins Google Meet for you, shares your screen, presents from a
 brief and answers questions by voice. Runs on your Mac with open-source models.
 
-Architecture: https://claude.ai/artifact/DR3FLfmkbyetLtKS8vJuNi
+![meet-agent architecture](docs/architecture.png)
+
+Rust runs the orchestrator, audio, speech and every tool; Python runs only the
+brain model (Qwen3-VL on MLX). How it all fits together, the meeting flow, states,
+models, speed and decisions: [docs/architecture.md](docs/architecture.md).
 
 ## Layout
 
@@ -20,6 +24,7 @@ Architecture: https://claude.ai/artifact/DR3FLfmkbyetLtKS8vJuNi
 | `config/` | TOML | Settings and Meet button labels |
 | `briefs/` | Markdown | One brief per meeting |
 | `prototype/` | Python | Working voice loop from Phase 2, reference for the port |
+| `docs/` | Markdown | Architecture doc and diagram |
 
 Models live in `~/.cache/huggingface/hub`. The agent's Chrome profile lives in
 `~/meet-agent-chrome`. Neither is in this repo.
