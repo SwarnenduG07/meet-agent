@@ -18,6 +18,9 @@ serde_json = "1"
 toml = "0.8"
 brain-client = { path = "crates/brain-client" }
 meet = { path = "crates/meet" }
+desktop = { path = "crates/desktop" }
+audio = { path = "crates/audio" }
+speech = { path = "crates/speech" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

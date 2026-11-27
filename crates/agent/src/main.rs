@@ -36,6 +36,9 @@ enum Cmd {
         /// Share the entire screen once in the call, then stop before leaving.
         #[arg(long)]
         share: bool,
+        /// App, file or URL to bring forward while sharing.
+        #[arg(long, requires = "share")]
+        show: Option<String>,
         /// Seconds to stay in the call (or to keep sharing) before leaving.
         #[arg(long, default_value_t = 20)]
         stay: u64,
@@ -61,14 +64,17 @@ fn main() -> Result<()> {
             link,
             dry_run,
             share,
+            show,
             stay,
-        } => tokio::runtime::Runtime::new()?.block_on(join::run(
-            &cfg,
-            &link,
-            dry_run,
-            share,
-            std::time::Duration::from_secs(stay),
-        )),
+        } => {
+            let opts = join::Options {
+                dry_run,
+                share,
+                show,
+                stay: std::time::Duration::from_secs(stay),
+            };
+            tokio::runtime::Runtime::new()?.block_on(join::run(&cfg, &link, opts))
+        }
         Cmd::Listen => bail!("not built yet: Phase 2b (audio + speech crates)"),
         Cmd::Run { .. } => bail!("not built yet: Phase 3 (orchestrator)"),
     }

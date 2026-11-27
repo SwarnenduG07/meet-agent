@@ -6,7 +6,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Labels {
     pub join_now: String,
     pub ask_to_join: String,
@@ -14,6 +14,9 @@ pub struct Labels {
     pub present: String,
     pub stop_presenting: String,
     pub leave_call: String,
+    pub in_call_audio: String,
+    pub presenting_texts: Vec<String>,
+    pub dismiss: Vec<String>,
 }
 
 impl Labels {

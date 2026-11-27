@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-chromiumoxide.workspace = true
+desktop.workspace = true
 meet.workspace = true
 clap.workspace = true
 serde.workspace = true
