@@ -34,3 +34,7 @@ listen *args:
 # Ask the brain one question (no audio)
 ask question:
     cargo run -q --release -p agent -- ask "{{question}}"
+
+# Join a meeting and talk (t = take over, s = share, l = leave)
+talk link *args:
+    cargo run -q --release -p agent -- talk "{{link}}" {{args}}

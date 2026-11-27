@@ -54,6 +54,7 @@ pub struct Audio {
     pub meet_speaker: String,
     pub monitor_output: String,
     pub listen_input: String,
+    pub your_mic: String,
 }
 
 #[derive(Debug, Deserialize)]

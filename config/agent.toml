@@ -16,6 +16,7 @@ agent_output = "BlackHole 2ch"        # the agent's voice → Meet's microphone
 meet_speaker = "Meet Output"          # Multi-Output device: your headphones + BlackHole 16ch
 monitor_output = ""                   # your headphones; empty = system default output
 listen_input = ""                     # `meet-agent listen`: mic; empty = system default
+your_mic = "MacBook Pro Microphone"   # your real mic, used in Meet when you take over
 
 [brain]
 project = "brain"                     # the Python uv project

@@ -57,7 +57,9 @@ impl Resampler {
             out.push(self.pending[i] * (1.0 - frac) + self.pending[i + 1] * frac);
             self.pos += self.step;
         }
-        let used = self.pos as usize;
+        // When going down in rate the position can step past the buffered input;
+        // drop what's been read and carry the rest of the step to the next block.
+        let used = (self.pos as usize).min(self.pending.len());
         self.pending.drain(..used);
         self.pos -= used as f64;
         out

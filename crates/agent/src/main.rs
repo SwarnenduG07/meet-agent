@@ -2,10 +2,12 @@
 
 mod ask;
 mod config;
+mod conversation;
 mod doctor;
 mod join;
 mod listen;
 mod login;
+mod meeting;
 mod voice;
 
 use std::path::PathBuf;
@@ -45,6 +47,15 @@ enum Cmd {
         /// Seconds to stay in the call (or to keep sharing) before leaving.
         #[arg(long, default_value_t = 20)]
         stay: u64,
+    },
+    /// Join a meeting and talk: answers questions, shares when asked, leaves on request.
+    Talk {
+        link: String,
+        #[arg(long, default_value = "briefs/example.md")]
+        brief: PathBuf,
+        /// App, file or URL to bring forward when sharing starts.
+        #[arg(long)]
+        show: Option<String>,
     },
     /// Ask the brain one question using a brief (developer test, no audio).
     Ask {
@@ -95,6 +106,10 @@ fn main() -> Result<()> {
                 stay: std::time::Duration::from_secs(stay),
             };
             tokio::runtime::Runtime::new()?.block_on(join::run(&cfg, &link, opts))
+        }
+        Cmd::Talk { link, brief, show } => {
+            let opts = meeting::Options { link, brief, show };
+            tokio::runtime::Runtime::new()?.block_on(meeting::run(&cfg, opts))
         }
         Cmd::Ask { question, brief } => {
             tokio::runtime::Runtime::new()?.block_on(ask::run(&cfg, &question, &brief))
