@@ -15,6 +15,7 @@ call_input = "BlackHole 16ch"         # Meet's speaker → the agent hears the c
 agent_output = "BlackHole 2ch"        # the agent's voice → Meet's microphone
 meet_speaker = "Meet Output"          # Multi-Output device: your headphones + BlackHole 16ch
 monitor_output = ""                   # your headphones; empty = system default output
+listen_input = ""                     # `meet-agent listen`: mic; empty = system default
 
 [brain]
 project = "brain"                     # the Python uv project
@@ -28,10 +29,15 @@ owner = "Sunny"                       # whose meetings these are
 labels = "config/meet-labels.toml"     # Meet button labels
 admit_timeout_secs = 300              # give up if nobody admits the agent
 
-# Role → Hugging Face repo (the brain is set above). Whisper and Kokoro switch to
-# GGML / ONNX files in Phase 2b.
+# Model files in the Hugging Face cache (the brain is set above).
 [models]
-vad = "onnx-community/silero-vad"
-smart_turn = "pipecat-ai/smart-turn-v3"
-whisper = "mlx-community/whisper-large-v3-turbo"
-tts = "hexgrad/Kokoro-82M"
+vad = { repo = "onnx-community/silero-vad", file = "onnx/model.onnx" }
+smart_turn = { repo = "pipecat-ai/smart-turn-v3", file = "smart-turn-v3.2-cpu.onnx" }
+whisper = { repo = "ggerganov/whisper.cpp", file = "ggml-large-v3-turbo-q8_0.bin" }
+tts = { repo = "onnx-community/Kokoro-82M-v1.0-ONNX", file = "onnx/model.onnx" }
+
+[speech]
+voice = "af_heart"                    # Kokoro voice file in voices/
+tts_threads = 8                       # CPU threads for Kokoro (8: ~0.5 s per sentence)
+# Words Whisper should expect, so names aren't misheard ("meet" vs "meat").
+expect_words = "Google Meet, meet agent, Sunny, Flowline, Rust API, Next.js, Supabase, Nango."

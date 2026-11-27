@@ -26,3 +26,11 @@ prototype:
 # Open the agent's Chrome profile to sign in to its Google account once
 login:
     cargo run -q -p agent -- login
+
+# Talk to the agent with your mic (Rust voice loop; wear headphones for --barge-in)
+listen *args:
+    cargo run -q --release -p agent -- listen {{args}}
+
+# Ask the brain one question (no audio)
+ask question:
+    cargo run -q --release -p agent -- ask "{{question}}"

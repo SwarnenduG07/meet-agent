@@ -10,7 +10,10 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
+audio.workspace = true
+speech.workspace = true
 brain-client.workspace = true
+hound.workspace = true
 desktop.workspace = true
 meet.workspace = true
 clap.workspace = true

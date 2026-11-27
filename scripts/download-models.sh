@@ -20,3 +20,9 @@ for entry in $models; do
 done
 echo "\n===== ALL DONE ====="
 du -sh ~/.cache/huggingface/hub/models--*
+
+# Formats the Rust agent reads (Phase 2b): Whisper as GGML, Kokoro as ONNX.
+echo "\n===== ggerganov/whisper.cpp (large-v3-turbo q8_0) ====="
+uvx --from "huggingface_hub[cli]" hf download ggerganov/whisper.cpp ggml-large-v3-turbo-q8_0.bin
+echo "\n===== onnx-community/Kokoro-82M-v1.0-ONNX ====="
+uvx --from "huggingface_hub[cli]" hf download onnx-community/Kokoro-82M-v1.0-ONNX onnx/model.onnx voices/af_heart.bin tokenizer.json config.json

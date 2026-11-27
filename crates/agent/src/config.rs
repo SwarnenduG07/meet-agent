@@ -16,8 +16,22 @@ pub struct Config {
     pub audio: Audio,
     pub brain: Brain,
     pub meet: Meet,
-    /// Role → Hugging Face repo, e.g. `vad = "onnx-community/silero-vad"`.
-    pub models: BTreeMap<String, String>,
+    pub speech: Speech,
+    /// Role → model file in the Hugging Face cache.
+    pub models: BTreeMap<String, ModelFile>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelFile {
+    pub repo: String,
+    pub file: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Speech {
+    pub voice: String,
+    pub tts_threads: usize,
+    pub expect_words: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +52,8 @@ pub struct Audio {
     pub call_input: String,
     pub agent_output: String,
     pub meet_speaker: String,
+    pub monitor_output: String,
+    pub listen_input: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,6 +95,15 @@ impl Config {
         }
     }
 
+    /// Path of a model file for `role` (e.g. "vad") in the Hugging Face cache.
+    pub fn model_path(&self, role: &str) -> Result<PathBuf> {
+        let m = self
+            .models
+            .get(role)
+            .with_context(|| format!("no [models] entry for {role:?}"))?;
+        Ok(snapshot_dir(&expand(&self.paths.hf_cache), &m.repo)?.join(&m.file))
+    }
+
     pub fn load(path: &Path) -> Result<Self> {
         let text =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
@@ -92,4 +117,22 @@ pub fn expand(path: &str) -> PathBuf {
         (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
         _ => PathBuf::from(path),
     }
+}
+
+/// The downloaded snapshot folder of a Hugging Face repo.
+pub fn snapshot_dir(cache: &Path, repo: &str) -> Result<PathBuf> {
+    let dir = cache
+        .join(format!("models--{}", repo.replace('/', "--")))
+        .join("snapshots");
+    std::fs::read_dir(&dir)
+        .with_context(|| format!("{repo} is not downloaded (run `just models`)"))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .find(|p| p.is_dir())
+        .with_context(|| format!("{repo} has no snapshot in {}", dir.display()))
+}
+
+/// Empty string in the config means "the system default device".
+pub fn device(name: &str) -> Option<String> {
+    (!name.trim().is_empty()).then(|| name.to_owned())
 }

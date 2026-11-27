@@ -2,7 +2,7 @@
 
 use std::{net::TcpListener, path::Path, process::Command};
 
-use crate::config::{Config, expand};
+use crate::config::{Config, expand, snapshot_dir};
 
 struct Report {
     failed: usize,
@@ -69,17 +69,26 @@ pub fn run(cfg: &Config) -> usize {
 
     println!("Models in {}", cfg.paths.hf_cache);
     let cache = expand(&cfg.paths.hf_cache);
-    let brain_role = "brain".to_string();
-    for (role, repo) in std::iter::once((&brain_role, &cfg.brain.model)).chain(&cfg.models) {
-        let dir = cache
-            .join(format!("models--{}", repo.replace('/', "--")))
-            .join("snapshots");
+    r.check(
+        snapshot_dir(&cache, &cfg.brain.model).is_ok(),
+        &format!("brain: {}", cfg.brain.model),
+        "run `just models`",
+    );
+    for (role, m) in &cfg.models {
+        let ok = cfg.model_path(role).is_ok_and(|p| p.is_file());
         r.check(
-            dir.is_dir(),
-            &format!("{role}: {repo}"),
-            "run scripts/download-models.sh",
+            ok,
+            &format!("{role}: {}/{}", m.repo, m.file),
+            "run `just models`",
         );
     }
+    let voice = snapshot_dir(&cache, &cfg.models["tts"].repo)
+        .map(|d| d.join(format!("voices/{}.bin", cfg.speech.voice)));
+    r.check(
+        voice.is_ok_and(|p| p.is_file()),
+        &format!("voice: {}", cfg.speech.voice),
+        "run `just models`",
+    );
 
     println!("Local ports");
     r.check(

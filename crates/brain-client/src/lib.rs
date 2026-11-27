@@ -183,6 +183,30 @@ impl Brain {
         let _ = self.send(Command::Cancel { id });
     }
 
+    /// Runs one realistic request with `context` so the first real question is
+    /// as fast as the rest, then forgets it.
+    ///
+    /// # Errors
+    /// Fails when the brain reports an error.
+    pub async fn warm_up(&self, context: &str) -> Result<()> {
+        let (_, mut rx) = self.think(
+            "Hello, can you hear me?",
+            "LISTENING",
+            &["answer"],
+            context,
+            None,
+        )?;
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                Event::Reply { .. } | Event::Cancelled { .. } => break,
+                Event::Error { message, .. } => bail!("brain warm-up: {message}"),
+                _ => {}
+            }
+        }
+        self.reset();
+        Ok(())
+    }
+
     /// Forgets the conversation.
     pub fn reset(&self) {
         let _ = self.send(Command::Reset);
@@ -198,7 +222,18 @@ impl Brain {
         for t in &self.tasks {
             t.abort();
         }
-        let _ = self.child.kill().await;
+        if let Some(pid) = self.child.id() {
+            let _ = tokio::process::Command::new("kill")
+                .args(["-TERM", &format!("-{pid}")])
+                .status()
+                .await;
+        }
+        if tokio::time::timeout(Duration::from_secs(3), self.child.wait())
+            .await
+            .is_err()
+        {
+            let _ = self.child.kill().await;
+        }
     }
 }
 
@@ -222,6 +257,8 @@ fn spawn_server(s: &Settings) -> Result<Child> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
+        // Own process group, so shutdown stops uv and the Python process under it.
+        .process_group(0)
         .spawn()
         .context("starting the Python brain server (is uv installed?)")
 }

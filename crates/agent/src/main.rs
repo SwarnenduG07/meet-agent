@@ -4,7 +4,9 @@ mod ask;
 mod config;
 mod doctor;
 mod join;
+mod listen;
 mod login;
+mod voice;
 
 use std::path::PathBuf;
 
@@ -50,8 +52,20 @@ enum Cmd {
         #[arg(long, default_value = "briefs/example.md")]
         brief: PathBuf,
     },
-    /// Voice loop with your mic and speakers, no Meet (Phase 2b test).
-    Listen,
+    /// Talk to the agent with your mic and speakers, no Meet.
+    Listen {
+        #[arg(long, default_value = "briefs/example.md")]
+        brief: PathBuf,
+        /// Stop talking when you talk (wear headphones).
+        #[arg(long)]
+        barge_in: bool,
+        /// Listen to a WAV recording instead of the mic.
+        #[arg(long)]
+        file: Option<PathBuf>,
+        /// Don't play any sound.
+        #[arg(long)]
+        mute: bool,
+    },
     /// Run a full meeting from a brief.
     Run { brief: PathBuf },
 }
@@ -85,7 +99,20 @@ fn main() -> Result<()> {
         Cmd::Ask { question, brief } => {
             tokio::runtime::Runtime::new()?.block_on(ask::run(&cfg, &question, &brief))
         }
-        Cmd::Listen => bail!("not built yet: Phase 2b (audio + speech crates)"),
+        Cmd::Listen {
+            brief,
+            barge_in,
+            file,
+            mute,
+        } => {
+            let opts = listen::Options {
+                brief,
+                barge_in,
+                file,
+                mute,
+            };
+            tokio::runtime::Runtime::new()?.block_on(listen::run(&cfg, opts))
+        }
         Cmd::Run { .. } => bail!("not built yet: Phase 3 (orchestrator)"),
     }
 }
