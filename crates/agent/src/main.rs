@@ -1,5 +1,6 @@
 //! `meet-agent`: joins Google Meet for you, presents from a brief and answers questions.
 
+mod ask;
 mod config;
 mod doctor;
 mod join;
@@ -43,6 +44,12 @@ enum Cmd {
         #[arg(long, default_value_t = 20)]
         stay: u64,
     },
+    /// Ask the brain one question using a brief (developer test, no audio).
+    Ask {
+        question: String,
+        #[arg(long, default_value = "briefs/example.md")]
+        brief: PathBuf,
+    },
     /// Voice loop with your mic and speakers, no Meet (Phase 2b test).
     Listen,
     /// Run a full meeting from a brief.
@@ -74,6 +81,9 @@ fn main() -> Result<()> {
                 stay: std::time::Duration::from_secs(stay),
             };
             tokio::runtime::Runtime::new()?.block_on(join::run(&cfg, &link, opts))
+        }
+        Cmd::Ask { question, brief } => {
+            tokio::runtime::Runtime::new()?.block_on(ask::run(&cfg, &question, &brief))
         }
         Cmd::Listen => bail!("not built yet: Phase 2b (audio + speech crates)"),
         Cmd::Run { .. } => bail!("not built yet: Phase 3 (orchestrator)"),

@@ -48,8 +48,12 @@ pub struct Meet {
 
 #[derive(Debug, Deserialize)]
 pub struct Brain {
+    pub project: String,
     pub model: String,
     pub port: u16,
+    pub startup_timeout_secs: u64,
+    pub name: String,
+    pub owner: String,
 }
 
 impl Config {
@@ -60,6 +64,18 @@ impl Config {
             profile_dir: expand(&self.chrome.profile_dir),
             debug_port: self.chrome.debug_port,
             share_source: self.chrome.share_source.clone(),
+        }
+    }
+
+    /// How to start the Python brain server.
+    pub fn brain(&self) -> brain_client::Settings {
+        brain_client::Settings {
+            project_dir: expand(&self.brain.project),
+            model: self.brain.model.clone(),
+            port: self.brain.port,
+            startup_timeout: std::time::Duration::from_secs(self.brain.startup_timeout_secs),
+            name: self.brain.name.clone(),
+            owner: self.brain.owner.clone(),
         }
     }
 

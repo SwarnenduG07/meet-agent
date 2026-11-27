@@ -1,4 +1,268 @@
-//! Rust side of the connection to the Python brain server.
-//! Phase 2b adds the supervisor (start, watch, restart) and the WebSocket client.
+//! Rust side of the connection to the Python brain server: start it, talk to it,
+//! stop it.
 
 pub mod protocol;
+
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    process::Stdio,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
+
+use anyhow::{Context, Result, bail};
+use futures::{SinkExt, StreamExt};
+use protocol::{Command, Event};
+use tokio::{
+    process::{Child, Command as Process},
+    sync::mpsc,
+    task::JoinHandle,
+};
+use tokio_tungstenite::tungstenite::Message;
+
+/// How to start the Python brain server.
+#[derive(Debug, Clone)]
+pub struct Settings {
+    /// The `brain/` uv project.
+    pub project_dir: PathBuf,
+    pub model: String,
+    pub port: u16,
+    pub startup_timeout: Duration,
+    /// How the agent introduces itself, e.g. "Sunny's meet agent".
+    pub name: String,
+    /// Whose meeting it is, e.g. "Sunny".
+    pub owner: String,
+}
+
+type Waiters = Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<Event>>>>;
+
+/// A running brain server and the connection to it.
+pub struct Brain {
+    child: Child,
+    outgoing: mpsc::UnboundedSender<Command>,
+    waiters: Waiters,
+    next_id: AtomicU64,
+    tasks: [JoinHandle<()>; 2],
+    pub model: String,
+}
+
+impl Brain {
+    /// Starts the server, connects, and waits until the model is loaded and warm.
+    ///
+    /// # Errors
+    /// Fails when the server exits early or isn't ready within the timeout.
+    pub async fn start(s: &Settings) -> Result<Self> {
+        let mut child = spawn_server(s)?;
+        let url = format!("ws://127.0.0.1:{}", s.port);
+        let start = Instant::now();
+        let ws = loop {
+            if let Some(status) = child.try_wait()? {
+                bail!("the brain server exited during startup ({status})");
+            }
+            if let Ok((ws, _)) = tokio_tungstenite::connect_async(&url).await {
+                break ws;
+            }
+            if start.elapsed() > s.startup_timeout {
+                bail!(
+                    "the brain server wasn't reachable within {:?}",
+                    s.startup_timeout
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        };
+        let (mut sink, mut stream) = ws.split();
+
+        let model = match tokio::time::timeout(s.startup_timeout, stream.next()).await {
+            Ok(Some(Ok(Message::Text(t)))) => match serde_json::from_str(&t)? {
+                Event::Ready { model } => model,
+                other => bail!("expected ready from the brain server, got {other:?}"),
+            },
+            _ => bail!("the brain server never said it was ready"),
+        };
+
+        let (outgoing, mut rx) = mpsc::unbounded_channel::<Command>();
+        let writer = tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                let Ok(text) = serde_json::to_string(&cmd) else {
+                    continue;
+                };
+                if sink.send(Message::text(text)).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        let waiters: Waiters = Arc::default();
+        let reader = tokio::spawn(route_events(stream, Arc::clone(&waiters)));
+
+        Ok(Self {
+            child,
+            outgoing,
+            waiters,
+            next_id: AtomicU64::new(1),
+            tasks: [writer, reader],
+            model,
+        })
+    }
+
+    fn register(&self) -> (u64, mpsc::UnboundedReceiver<Event>) {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.waiters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id, tx);
+        (id, rx)
+    }
+
+    fn send(&self, cmd: Command) -> Result<()> {
+        self.outgoing
+            .send(cmd)
+            .map_err(|_| anyhow::anyhow!("brain server connection closed"))
+    }
+
+    /// Asks for the next action. Returns the request id and a stream of
+    /// `Sentence` events ending with `Reply`, `Cancelled` or `Error`.
+    ///
+    /// # Errors
+    /// Fails when the connection is closed.
+    pub fn think(
+        &self,
+        text: &str,
+        state: &str,
+        allowed: &[&str],
+        context: &str,
+        image: Option<String>,
+    ) -> Result<(u64, mpsc::UnboundedReceiver<Event>)> {
+        let (id, rx) = self.register();
+        self.send(Command::Think {
+            id,
+            text: text.to_owned(),
+            state: state.to_owned(),
+            allowed: allowed.iter().map(|a| (*a).to_owned()).collect(),
+            context: context.to_owned(),
+            image,
+        })?;
+        Ok((id, rx))
+    }
+
+    /// Plain completion (briefs, summaries, looking at a screenshot).
+    ///
+    /// # Errors
+    /// Fails when the brain reports an error or the connection drops.
+    pub async fn complete(
+        &self,
+        prompt: &str,
+        max_tokens: u32,
+        image: Option<String>,
+    ) -> Result<String> {
+        let (id, mut rx) = self.register();
+        self.send(Command::Complete {
+            id,
+            prompt: prompt.to_owned(),
+            max_tokens,
+            image,
+        })?;
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                Event::Text { text, .. } => return Ok(text),
+                Event::Error { message, .. } => bail!("brain: {message}"),
+                Event::Cancelled { .. } => bail!("brain request cancelled"),
+                _ => {}
+            }
+        }
+        bail!("brain server disconnected")
+    }
+
+    /// Stops a running request.
+    pub fn cancel(&self, id: u64) {
+        let _ = self.send(Command::Cancel { id });
+    }
+
+    /// Forgets the conversation.
+    pub fn reset(&self) {
+        let _ = self.send(Command::Reset);
+    }
+
+    /// True while the server process is running.
+    pub fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// Stops the server; its memory is freed.
+    pub async fn shutdown(mut self) {
+        for t in &self.tasks {
+            t.abort();
+        }
+        let _ = self.child.kill().await;
+    }
+}
+
+fn spawn_server(s: &Settings) -> Result<Child> {
+    Process::new("uv")
+        .args(["run", "-q", "--project"])
+        .arg(&s.project_dir)
+        .args([
+            "brain-server",
+            "--port",
+            &s.port.to_string(),
+            "--model",
+            &s.model,
+        ])
+        .args(["--name", &s.name, "--owner", &s.owner])
+        .args(["--parent-pid", &std::process::id().to_string()])
+        // Models are already downloaded; never reach out to Hugging Face.
+        .env("HF_HUB_OFFLINE", "1")
+        .env("TRANSFORMERS_OFFLINE", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true)
+        .spawn()
+        .context("starting the Python brain server (is uv installed?)")
+}
+
+/// Sends every event to the request that's waiting for it.
+async fn route_events<S>(mut stream: S, routes: Waiters)
+where
+    S: futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    while let Some(Ok(msg)) = stream.next().await {
+        let Message::Text(text) = msg else { continue };
+        let Ok(event) = serde_json::from_str::<Event>(&text) else {
+            continue;
+        };
+        let done = matches!(
+            event,
+            Event::Reply { .. }
+                | Event::Text { .. }
+                | Event::Cancelled { .. }
+                | Event::Error { .. }
+        );
+        let mut map = routes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(id) = event.id() {
+            if let Some(tx) = map.get(&id) {
+                let _ = tx.send(event);
+            }
+            if done {
+                map.remove(&id);
+            }
+        }
+    }
+    // Connection lost: wake everyone who is waiting.
+    let mut map = routes
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (id, tx) in map.drain() {
+        let _ = tx.send(Event::Error {
+            id: Some(id),
+            message: "brain server disconnected".into(),
+        });
+    }
+}

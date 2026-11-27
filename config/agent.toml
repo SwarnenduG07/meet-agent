@@ -17,9 +17,12 @@ meet_speaker = "Meet Output"          # Multi-Output device: your headphones + B
 monitor_output = ""                   # your headphones; empty = system default output
 
 [brain]
+project = "brain"                     # the Python uv project
 model = "mlx-community/Qwen3-VL-8B-Instruct-4bit"
 port = 8790
-startup_timeout_secs = 120
+startup_timeout_secs = 180
+name = "Sunny's meet agent"           # how the agent introduces itself
+owner = "Sunny"                       # whose meetings these are
 
 [meet]
 labels = "config/meet-labels.toml"     # Meet button labels
