@@ -21,6 +21,7 @@ use crate::{capture::find_device, resample::Resampler};
 
 struct Output {
     queue: Arc<Mutex<VecDeque<f32>>>,
+    rate: u32,
     resampler: Mutex<Resampler>,
     _stop: mpsc::Sender<()>,
 }
@@ -33,6 +34,8 @@ pub struct Player {
 
 impl Player {
     /// Opens every output in `names` (`None` = the system default output).
+    /// With no names, audio goes to a silent output that still plays in real
+    /// time, so pacing and interruptions behave as with a real device.
     /// `source_rate` is the rate of the audio passed to [`Player::play`].
     ///
     /// # Errors
@@ -44,6 +47,10 @@ impl Player {
             let (out, label) = open_output(name.clone(), source_rate)?;
             outputs.push(out);
             devices.push(label);
+        }
+        if names.is_empty() {
+            outputs.push(silent_output(source_rate));
+            devices.push("silent (muted)".into());
         }
         Ok(Self {
             outputs,
@@ -88,6 +95,14 @@ impl Player {
         })
     }
 
+    /// Seconds of audio still queued on the first output.
+    #[must_use]
+    pub fn queued_secs(&self) -> f32 {
+        self.outputs.first().map_or(0.0, |o| {
+            o.queue.lock().unwrap_or_else(PoisonError::into_inner).len() as f32 / o.rate as f32
+        })
+    }
+
     /// Blocks until everything queued has played (or `stop` was called).
     pub fn wait(&self) {
         while self.is_playing() {
@@ -98,6 +113,31 @@ impl Player {
     #[must_use]
     pub fn source_rate(&self) -> u32 {
         self.source_rate
+    }
+}
+
+/// Drains its queue at `rate` samples per second without making a sound.
+fn silent_output(rate: u32) -> Output {
+    let queue: Arc<Mutex<VecDeque<f32>>> = Arc::default();
+    let (stop, stop_rx) = mpsc::channel::<()>();
+    let shared = Arc::clone(&queue);
+    thread::spawn(move || {
+        let tick = Duration::from_millis(20);
+        let per_tick = rate as usize / 50;
+        while stop_rx
+            .recv_timeout(tick)
+            .is_err_and(|e| e == mpsc::RecvTimeoutError::Timeout)
+        {
+            let mut pending = shared.lock().unwrap_or_else(PoisonError::into_inner);
+            let n = per_tick.min(pending.len());
+            pending.drain(..n);
+        }
+    });
+    Output {
+        queue,
+        rate,
+        resampler: Mutex::new(Resampler::new(rate, rate)),
+        _stop: stop,
     }
 }
 
@@ -153,6 +193,7 @@ fn open_output(name: Option<String>, source_rate: u32) -> Result<(Output, String
         .map_err(|_| anyhow!("audio thread died"))??;
     let out = Output {
         queue,
+        rate,
         resampler: Mutex::new(Resampler::new(source_rate, rate)),
         _stop: stop,
     };

@@ -150,6 +150,12 @@ impl Voice {
         self.player.stop();
     }
 
+    /// Seconds of speech still queued to play.
+    #[must_use]
+    pub fn queued_secs(&self) -> f32 {
+        self.player.queued_secs()
+    }
+
     #[must_use]
     pub fn is_speaking(&self) -> bool {
         self.player.is_playing()

@@ -38,3 +38,11 @@ ask question:
 # Join a meeting and talk (t = take over, s = share, l = leave)
 talk link *args:
     cargo run -q --release -p agent -- talk "{{link}}" {{args}}
+
+# Run a whole meeting from a brief (prepare, join, present, answer, summary)
+run brief *args:
+    cargo run -q --release -p agent -- run "{{brief}}" {{args}}
+
+# Practise a brief locally: same flow, no Meet
+rehearse brief *args:
+    cargo run -q --release -p agent -- run "{{brief}}" --rehearse {{args}}

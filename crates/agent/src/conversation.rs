@@ -43,6 +43,8 @@ pub trait Director {
     fn allowed(&self) -> Vec<&'static str>;
     /// Brief, current section and anything else the brain should know.
     fn context(&self) -> String;
+    /// Someone started talking (the agent may have been interrupted).
+    fn speech_started(&mut self) {}
     /// False while the user has taken over; turns are then ignored.
     fn listening(&self) -> bool {
         true
@@ -57,8 +59,9 @@ pub trait Director {
     ) -> Result<Flow> {
         Ok(Flow::Continue)
     }
-    /// Called about once a second (e.g. to notice the meeting ended).
-    async fn tick(&mut self, _tools: &Tools<'_>) -> Result<Flow> {
+    /// Called every 250 ms (present the next sentence, notice the meeting ended).
+    /// `busy`: a question is being answered right now.
+    async fn tick(&mut self, _tools: &Tools<'_>, _busy: bool) -> Result<Flow> {
         Ok(Flow::Continue)
     }
     /// A keyboard command.
@@ -133,7 +136,8 @@ pub async fn run<D: Director>(
     let mut current: Option<Turn> = None;
     let mut pending: Option<(String, Instant)> = None;
     let mut input_done = false;
-    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    // Fast enough to queue the next presented sentence before the last one ends.
+    let mut tick = tokio::time::interval(Duration::from_millis(250));
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
@@ -153,6 +157,7 @@ pub async fn run<D: Director>(
                     Flow::Continue
                 }
                 Some(Heard::SpeechStarted) => {
+                    director.speech_started();
                     if opts.barge_in && (voice.is_speaking() || current.is_some()) {
                         voice.stop();
                         if let Some(c) = current.take() {
@@ -179,7 +184,7 @@ pub async fn run<D: Director>(
                 }
             },
             event = next_event(&mut current) => on_brain_event(&tools, director, &mut current, &mut pending, event).await?,
-            _ = tick.tick() => director.tick(&tools).await?,
+            _ = tick.tick() => director.tick(&tools, current.is_some()).await?,
             Some(control) = controls.recv() => director.control(control, &tools).await?,
         };
         if flow == Flow::Stop || (opts.stop_at_end_of_input && input_done && current.is_none()) {

@@ -7,12 +7,15 @@ mod doctor;
 mod join;
 mod listen;
 mod login;
-mod meeting;
+mod orchestrator;
+mod plan;
+mod run;
+mod timeline;
 mod voice;
 
 use std::path::PathBuf;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -53,9 +56,6 @@ enum Cmd {
         link: String,
         #[arg(long, default_value = "briefs/example.md")]
         brief: PathBuf,
-        /// App, file or URL to bring forward when sharing starts.
-        #[arg(long)]
-        show: Option<String>,
     },
     /// Ask the brain one question using a brief (developer test, no audio).
     Ask {
@@ -77,8 +77,28 @@ enum Cmd {
         #[arg(long)]
         mute: bool,
     },
-    /// Run a full meeting from a brief.
-    Run { brief: PathBuf },
+    /// Run a full meeting from a brief: prepare, join, present, answer, leave, summary.
+    Run {
+        brief: PathBuf,
+        /// Meet link (overrides the brief's).
+        #[arg(long)]
+        link: Option<String>,
+        /// Join now instead of waiting for the brief's start time.
+        #[arg(long)]
+        now: bool,
+        /// Run everything locally (mic and speakers) without joining Meet.
+        #[arg(long)]
+        rehearse: bool,
+        /// Rehearsal: listen to a WAV recording instead of the mic.
+        #[arg(long, requires = "rehearse")]
+        file: Option<PathBuf>,
+        /// Rehearsal: seconds before the recording starts.
+        #[arg(long, default_value_t = 0)]
+        file_delay: u32,
+        /// Rehearsal: play no sound.
+        #[arg(long)]
+        mute: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -107,9 +127,18 @@ fn main() -> Result<()> {
             };
             tokio::runtime::Runtime::new()?.block_on(join::run(&cfg, &link, opts))
         }
-        Cmd::Talk { link, brief, show } => {
-            let opts = meeting::Options { link, brief, show };
-            tokio::runtime::Runtime::new()?.block_on(meeting::run(&cfg, opts))
+        Cmd::Talk { link, brief } => {
+            let opts = run::Options {
+                brief,
+                link: Some(link),
+                share: Some(plan::SharePolicy::OnRequest),
+                now: true,
+                rehearse: false,
+                file: None,
+                file_delay: 0,
+                mute: false,
+            };
+            tokio::runtime::Runtime::new()?.block_on(run::run(&cfg, opts))
         }
         Cmd::Ask { question, brief } => {
             tokio::runtime::Runtime::new()?.block_on(ask::run(&cfg, &question, &brief))
@@ -128,6 +157,26 @@ fn main() -> Result<()> {
             };
             tokio::runtime::Runtime::new()?.block_on(listen::run(&cfg, opts))
         }
-        Cmd::Run { .. } => bail!("not built yet: Phase 3 (orchestrator)"),
+        Cmd::Run {
+            brief,
+            link,
+            now,
+            rehearse,
+            file,
+            file_delay,
+            mute,
+        } => {
+            let opts = run::Options {
+                brief,
+                link,
+                share: None,
+                now,
+                rehearse,
+                file,
+                file_delay,
+                mute,
+            };
+            tokio::runtime::Runtime::new()?.block_on(run::run(&cfg, opts))
+        }
     }
 }

@@ -37,6 +37,7 @@ pub struct Speech {
 #[derive(Debug, Deserialize)]
 pub struct Paths {
     pub hf_cache: String,
+    pub runs: String,
 }
 
 #[derive(Debug, Deserialize)]
