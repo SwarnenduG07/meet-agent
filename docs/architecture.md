@@ -141,7 +141,7 @@ Measured with the prototype, from the end of a question to the first word heard:
 | Brain | ~1.1 s (full answer) | ~0.45 s (first sentence, streamed) |
 | Kokoro first audio | ~0.4 s | ~0.25 s |
 | Rust ↔ Python hops | ~1 ms each | ~1 ms each |
-| **Total** | **2.3–2.8 s** | **~1.5 s** |
+| **Total** | **~3.0 s** (Rust loop, measured) | **~1.5 s** |
 
 Memory on 24 GB: macOS + Chrome + Meet ~8 GB, Rust models ~2 GB, Python brain
 ~5.5 GB + ~1 GB conversation cache + ~0.4 GB runtime. About 7 GB stays free.
@@ -168,15 +168,21 @@ without vision.
 
 ## Build phases
 
-| Phase | What | Done when | Status |
-|---|---|---|---|
-| 0 | Audio routing: BlackHole + Meet Output | A sound reaches a test Meet; you hear the call | In progress |
-| 1 | Rust joins and shares, no AI (`meet` crate, `just login`) | `meet-agent join <link>` joins, shares, leaves | Next |
-| 2 | Python voice loop prototype | Answers from a brief by voice | Done (2.3–2.8 s) |
-| 2b | Split into Rust + Python brain server | Same answers, ~1.5 s | |
-| 3 | Orchestrator, states, brief → plan | "Can you share your screen?" starts sharing | |
-| 4 | Screen tools: screenshot → coordinates → spotlight | Points at each section while explaining | |
-| 5 | Demo executor + hardening | Full walkthrough with no help | |
+| Phase | What | Status |
+|---|---|---|
+| 0 | Audio routing: BlackHole + Meet Output | BlackHole installed; Meet Output device still to create |
+| 1 | Rust joins Meet over CDP: login, green room, join, share, leave | Built; join tested in a real call, sharing not yet |
+| 2 | Python voice loop prototype | Done, kept in `prototype/` |
+| 2b | Rust voice loop + Python brain server | Done; ~3 s from end of question to first audio |
+| 2c | Voice in Meet: BlackHole in/out, interruptions, take-over key | Built; tested through BlackHole without Meet |
+| 3 | Orchestrator: brief → plan, states, policy, presenting, summary | Done; rehearsed end to end |
+| 4 | Screen tools: screenshot → Qwen3-VL box → spotlight ring | Built; lookup verified on the architecture diagram |
+| 5 | Demo steps (`do:`) and hardening (brain restart, timeouts, rejoin) | Done; brain-crash recovery tested |
+| 6 | Draft briefs from Codex / Claude Code threads | Done |
+
+Still to tune: Kokoro's first sentence is slower while the brain is still
+writing (both compete for memory bandwidth), so first audio is ~3 s, not the
+~1.5 s target.
 
 ## Risks
 
