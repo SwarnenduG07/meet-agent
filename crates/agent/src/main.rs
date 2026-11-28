@@ -2,6 +2,7 @@
 
 mod ask;
 mod config;
+mod connectors;
 mod conversation;
 mod demo;
 mod doctor;
@@ -65,6 +66,21 @@ enum Cmd {
         /// Look in this image instead of taking a screenshot.
         #[arg(long)]
         image: Option<PathBuf>,
+    },
+    /// Draft a brief from a Codex or Claude Code planning thread (local files).
+    Brief {
+        /// Codex thread: `latest`, a session id, or a path.
+        #[arg(long, conflicts_with = "from_claude")]
+        from_codex: Option<String>,
+        /// Claude Code session: `latest`, a session id, or a path.
+        #[arg(long)]
+        from_claude: Option<String>,
+        /// Where to write the draft (default: briefs/drafts/<title>.md).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// List recent threads instead.
+        #[arg(long)]
+        list: bool,
     },
     /// Ask the brain one question using a brief (developer test, no audio).
     Ask {
@@ -152,6 +168,18 @@ fn main() -> Result<()> {
         Cmd::Point { target, image } => {
             tokio::runtime::Runtime::new()?.block_on(point(&cfg, &target, image))
         }
+        Cmd::Brief {
+            from_codex,
+            from_claude,
+            out,
+            list,
+        } => tokio::runtime::Runtime::new()?.block_on(brief(
+            &cfg,
+            from_codex,
+            from_claude,
+            out,
+            list,
+        )),
         Cmd::Ask { question, brief } => {
             tokio::runtime::Runtime::new()?.block_on(ask::run(&cfg, &question, &brief))
         }
@@ -220,4 +248,64 @@ async fn point(cfg: &config::Config, target: &str, image: Option<PathBuf>) -> Re
     };
     brain.shutdown().await;
     result
+}
+
+async fn brief(
+    cfg: &config::Config,
+    from_codex: Option<String>,
+    from_claude: Option<String>,
+    out: Option<PathBuf>,
+    list: bool,
+) -> Result<()> {
+    use connectors::Source;
+    let (source, which) = match (from_codex, from_claude) {
+        (Some(w), _) => (Source::Codex, w),
+        (None, Some(w)) => (Source::Claude, w),
+        (None, None) => (Source::Codex, "latest".to_owned()),
+    };
+    if list {
+        for path in connectors::files(source)?.into_iter().take(15) {
+            let t = connectors::read(source, &path)?;
+            println!(
+                "{:>4} msgs  {}  {}",
+                t.messages.len(),
+                t.title,
+                path.display()
+            );
+        }
+        return Ok(());
+    }
+    let path = connectors::find(source, &which)?;
+    let thread = connectors::read(source, &path)?;
+    println!(
+        "Thread: {} ({} messages)",
+        thread.title,
+        thread.messages.len()
+    );
+    let slug: String = thread
+        .title
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .take(6)
+        .collect::<Vec<_>>()
+        .join("-");
+    let out = out.unwrap_or_else(|| PathBuf::from(format!("briefs/drafts/{slug}.md")));
+    let brain = brain_client::Brain::start(&cfg.brain()).await?;
+    let result = connectors::draft_brief(&brain, &thread, &cfg.brain.owner, &out).await;
+    brain.shutdown().await;
+    result?;
+    println!("Draft brief: {}", out.display());
+    println!(
+        "Review it before use: check every fact, remove anything private, add `link:` to the header."
+    );
+    Ok(())
 }

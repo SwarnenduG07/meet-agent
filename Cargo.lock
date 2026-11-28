@@ -13,6 +13,7 @@ dependencies = [
  "desktop",
  "hound",
  "meet",
+ "regex",
  "serde",
  "serde_json",
  "speech",

@@ -50,3 +50,7 @@ rehearse brief *args:
 # Find something on screen and ring it, e.g. just point "Orchestrator"
 point target *args:
     cargo run -q --release -p agent -- point "{{target}}" {{args}}
+
+# Draft a brief from a planning thread: just brief --from-codex latest (or --from-claude latest, --list)
+brief *args:
+    cargo run -q --release -p agent -- brief {{args}}

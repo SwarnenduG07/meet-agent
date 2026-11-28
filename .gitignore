@@ -4,3 +4,4 @@ brain/.venv
 __pycache__/
 *.wav
 .DS_Store
+/briefs/drafts

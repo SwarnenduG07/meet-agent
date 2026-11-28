@@ -16,6 +16,7 @@ brain-client.workspace = true
 hound.workspace = true
 desktop.workspace = true
 meet.workspace = true
+regex.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
