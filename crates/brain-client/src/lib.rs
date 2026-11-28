@@ -40,13 +40,19 @@ pub struct Settings {
 
 type Waiters = Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<Event>>>>;
 
+/// The server process and the live connection to it; replaced on restart.
+struct Link {
+    child: Child,
+    outgoing: mpsc::UnboundedSender<Command>,
+    tasks: [JoinHandle<()>; 2],
+}
+
 /// A running brain server and the connection to it.
 pub struct Brain {
-    child: tokio::sync::Mutex<Child>,
-    outgoing: mpsc::UnboundedSender<Command>,
+    link: Mutex<Option<Link>>,
+    settings: Settings,
     waiters: Waiters,
     next_id: AtomicU64,
-    tasks: [JoinHandle<()>; 2],
     pub model: String,
 }
 
@@ -56,57 +62,41 @@ impl Brain {
     /// # Errors
     /// Fails when the server exits early or isn't ready within the timeout.
     pub async fn start(s: &Settings) -> Result<Self> {
-        let mut child = spawn_server(s)?;
-        let url = format!("ws://127.0.0.1:{}", s.port);
-        let start = Instant::now();
-        let ws = loop {
-            if let Some(status) = child.try_wait()? {
-                bail!("the brain server exited during startup ({status})");
-            }
-            if let Ok((ws, _)) = tokio_tungstenite::connect_async(&url).await {
-                break ws;
-            }
-            if start.elapsed() > s.startup_timeout {
-                bail!(
-                    "the brain server wasn't reachable within {:?}",
-                    s.startup_timeout
-                );
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        };
-        let (mut sink, mut stream) = ws.split();
-
-        let model = match tokio::time::timeout(s.startup_timeout, stream.next()).await {
-            Ok(Some(Ok(Message::Text(t)))) => match serde_json::from_str(&t)? {
-                Event::Ready { model } => model,
-                other => bail!("expected ready from the brain server, got {other:?}"),
-            },
-            _ => bail!("the brain server never said it was ready"),
-        };
-
-        let (outgoing, mut rx) = mpsc::unbounded_channel::<Command>();
-        let writer = tokio::spawn(async move {
-            while let Some(cmd) = rx.recv().await {
-                let Ok(text) = serde_json::to_string(&cmd) else {
-                    continue;
-                };
-                if sink.send(Message::text(text)).await.is_err() {
-                    break;
-                }
-            }
-        });
-
         let waiters: Waiters = Arc::default();
-        let reader = tokio::spawn(route_events(stream, Arc::clone(&waiters)));
-
+        let (link, model) = connect(s, Arc::clone(&waiters)).await?;
         Ok(Self {
-            child: tokio::sync::Mutex::new(child),
-            outgoing,
+            link: Mutex::new(Some(link)),
+            settings: s.clone(),
             waiters,
             next_id: AtomicU64::new(1),
-            tasks: [writer, reader],
             model,
         })
+    }
+
+    /// Stops the server and starts a fresh one (after a crash). Requests that were
+    /// waiting get an error.
+    ///
+    /// # Errors
+    /// Fails when the new server doesn't come up.
+    pub async fn restart(&self) -> Result<()> {
+        self.shutdown().await;
+        for (id, tx) in self
+            .waiters
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .drain()
+        {
+            let _ = tx.send(Event::Error {
+                id: Some(id),
+                message: "brain server restarted".into(),
+            });
+        }
+        let (link, _) = connect(&self.settings, Arc::clone(&self.waiters)).await?;
+        *self
+            .link
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(link);
+        Ok(())
     }
 
     fn register(&self) -> (u64, mpsc::UnboundedReceiver<Event>) {
@@ -120,7 +110,14 @@ impl Brain {
     }
 
     fn send(&self, cmd: Command) -> Result<()> {
-        self.outgoing
+        let link = self
+            .link
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let link = link
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("brain server is stopped"))?;
+        link.outgoing
             .send(cmd)
             .map_err(|_| anyhow::anyhow!("brain server connection closed"))
     }
@@ -213,29 +210,89 @@ impl Brain {
     }
 
     /// True while the server process is running.
-    pub async fn is_alive(&self) -> bool {
-        matches!(self.child.lock().await.try_wait(), Ok(None))
+    pub fn is_alive(&self) -> bool {
+        let mut link = self
+            .link
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        link.as_mut()
+            .is_some_and(|l| matches!(l.child.try_wait(), Ok(None)))
     }
 
     /// Stops the server; its memory is freed. Safe to call from a shared handle.
     pub async fn shutdown(&self) {
-        for t in &self.tasks {
+        let link = self
+            .link
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let Some(mut link) = link else { return };
+        for t in &link.tasks {
             t.abort();
         }
-        let mut child = self.child.lock().await;
-        if let Some(pid) = child.id() {
+        if let Some(pid) = link.child.id() {
             let _ = tokio::process::Command::new("kill")
                 .args(["-TERM", &format!("-{pid}")])
                 .status()
                 .await;
         }
-        if tokio::time::timeout(Duration::from_secs(3), child.wait())
+        if tokio::time::timeout(Duration::from_secs(3), link.child.wait())
             .await
             .is_err()
         {
-            let _ = child.kill().await;
+            let _ = link.child.kill().await;
         }
     }
+}
+
+/// Starts the server process, connects, and waits for `ready`.
+async fn connect(s: &Settings, waiters: Waiters) -> Result<(Link, String)> {
+    let mut child = spawn_server(s)?;
+    let url = format!("ws://127.0.0.1:{}", s.port);
+    let start = Instant::now();
+    let ws = loop {
+        if let Some(status) = child.try_wait()? {
+            bail!("the brain server exited during startup ({status})");
+        }
+        if let Ok((ws, _)) = tokio_tungstenite::connect_async(&url).await {
+            break ws;
+        }
+        if start.elapsed() > s.startup_timeout {
+            bail!(
+                "the brain server wasn't reachable within {:?}",
+                s.startup_timeout
+            );
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    let (mut sink, mut stream) = ws.split();
+    let model = match tokio::time::timeout(s.startup_timeout, stream.next()).await {
+        Ok(Some(Ok(Message::Text(t)))) => match serde_json::from_str(&t)? {
+            Event::Ready { model } => model,
+            other => bail!("expected ready from the brain server, got {other:?}"),
+        },
+        _ => bail!("the brain server never said it was ready"),
+    };
+    let (outgoing, mut rx) = mpsc::unbounded_channel::<Command>();
+    let writer = tokio::spawn(async move {
+        while let Some(cmd) = rx.recv().await {
+            let Ok(text) = serde_json::to_string(&cmd) else {
+                continue;
+            };
+            if sink.send(Message::text(text)).await.is_err() {
+                break;
+            }
+        }
+    });
+    let reader = tokio::spawn(route_events(stream, waiters));
+    Ok((
+        Link {
+            child,
+            outgoing,
+            tasks: [writer, reader],
+        },
+        model,
+    ))
 }
 
 fn spawn_server(s: &Settings) -> Result<Child> {

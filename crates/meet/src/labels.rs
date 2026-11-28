@@ -15,6 +15,7 @@ pub struct Labels {
     pub stop_presenting: String,
     pub leave_call: String,
     pub in_call_audio: String,
+    pub rejoin: String,
     pub presenting_texts: Vec<String>,
     pub dismiss: Vec<String>,
 }

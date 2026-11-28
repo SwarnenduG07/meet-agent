@@ -13,6 +13,7 @@
 //! ### 1. Section title
 //! show: app, file or URL to bring forward
 //! point: what to point at (screen tools)
+//! do: open <url> | keys cmd+t | type text | click "Label" | wait 2
 //! - talking point
 //! ## FAQ / ## Do not discuss
 //! ```
@@ -34,12 +35,51 @@ pub enum SharePolicy {
     Never,
 }
 
+/// One demo step from a `do:` line, run when its section starts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "do", content = "arg", rename_all = "snake_case")]
+pub enum Step {
+    /// `do: open <url, file or app>`
+    Open(String),
+    /// `do: keys cmd+t`
+    Keys(String),
+    /// `do: type some text`
+    Type(String),
+    /// `do: click "Button label"` (found on screen, then clicked)
+    Click(String),
+    /// `do: wait 2`
+    Wait(f64),
+}
+
+impl std::str::FromStr for Step {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        let (verb, arg) = s.trim().split_once(' ').unwrap_or((s.trim(), ""));
+        let arg = arg.trim().trim_matches('"').to_owned();
+        Ok(match verb {
+            "open" => Self::Open(arg),
+            "keys" => Self::Keys(arg),
+            "type" => Self::Type(arg),
+            "click" => Self::Click(arg),
+            "wait" => Self::Wait(
+                arg.parse()
+                    .with_context(|| format!("`do: wait` needs seconds, got {arg:?}"))?,
+            ),
+            other => bail!("unknown demo step `do: {other}` (use open, keys, type, click or wait)"),
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
     pub title: String,
     pub show: Option<String>,
     pub point: Option<String>,
     pub talk: Vec<String>,
+    /// Demo steps run when the section starts.
+    #[serde(default)]
+    pub steps: Vec<Step>,
     /// What the agent says, written by the brain before the meeting.
     #[serde(default)]
     pub script: Vec<String>,
@@ -124,11 +164,14 @@ fn parse(text: &str) -> Result<Plan> {
                 show: None,
                 point: None,
                 talk: Vec::new(),
+                steps: Vec::new(),
                 script: Vec::new(),
             });
         } else if let Some(section) = plan.sections.last_mut().filter(|_| in_sections) {
             if let Some(v) = trimmed.strip_prefix("show:") {
                 section.show = Some(v.trim().to_owned());
+            } else if let Some(v) = trimmed.strip_prefix("do:") {
+                section.steps.push(v.parse()?);
             } else if let Some(v) = trimmed.strip_prefix("point:") {
                 section.point = Some(v.trim().to_owned());
             } else if let Some(v) = trimmed.strip_prefix("- ") {
@@ -198,6 +241,12 @@ mod tests {
         );
         assert_eq!(plan.sections[1].point.as_deref(), Some("Orchestrator"));
         assert_eq!(plan.sections[1].talk.len(), 4);
+        assert_eq!(plan.sections[0].steps, vec![Step::Wait(1.0)]);
+        assert_eq!(
+            "click \"Run workflow\"".parse::<Step>().unwrap(),
+            Step::Click("Run workflow".into())
+        );
+        assert!("dance now".parse::<Step>().is_err());
         assert!(plan.context.contains("Do not discuss"));
         assert!(!plan.context.contains("link:"));
     }

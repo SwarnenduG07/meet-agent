@@ -194,6 +194,13 @@ impl Call {
         bail!("Meet still shows we're presenting")
     }
 
+    /// Clicks Rejoin if Meet shows it (after a network drop). True if clicked.
+    pub async fn rejoin(&self) -> bool {
+        session::click(&self.page, &self.labels.rejoin)
+            .await
+            .is_ok()
+    }
+
     /// Switches the microphone during the call (e.g. to the user's real mic).
     ///
     /// # Errors

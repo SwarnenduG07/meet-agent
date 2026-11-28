@@ -121,6 +121,30 @@ pub fn spotlight(overlay: &Path, display: usize, rect: Rect, seconds: f64) -> Re
     Ok(())
 }
 
+/// Left-clicks at `x, y` (points) on display `n` (1-based). macOS asks once to
+/// allow the terminal under Privacy & Security > Accessibility.
+///
+/// # Errors
+/// Fails when the helper fails.
+pub fn click(overlay: &Path, display: usize, x: f64, y: f64) -> Result<()> {
+    let out = Command::new(overlay)
+        .args([
+            "click",
+            &format!("{x:.1}"),
+            &format!("{y:.1}"),
+            &display.to_string(),
+        ])
+        .output()
+        .context("clicking")?;
+    if !out.status.success() {
+        bail!(
+            "click failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
 /// Turns a box on Qwen-VL's 0-1000 grid into points on a display.
 #[must_use]
 pub fn from_grid(grid: [f64; 4], display: &Display) -> Rect {

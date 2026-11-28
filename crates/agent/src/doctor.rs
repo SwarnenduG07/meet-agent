@@ -53,8 +53,13 @@ pub fn run(cfg: &Config) -> usize {
     );
     r.check(
         on_path("espeak-ng"),
-        "espeak-ng (Kokoro pronunciation, Phase 2b)",
+        "espeak-ng (Kokoro pronunciation)",
         "brew install espeak-ng",
+    );
+    r.check(
+        on_path("swiftc"),
+        "swiftc (screen pointing and clicks)",
+        "xcode-select --install",
     );
 
     println!("Audio devices");

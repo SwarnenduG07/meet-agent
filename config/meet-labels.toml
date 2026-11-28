@@ -8,6 +8,7 @@ present = "Share screen"           # verified
 stop_presenting = "Stop presenting"
 leave_call = "Leave call"          # verified
 in_call_audio = "Audio settings"   # verified: opens mic/speaker list during a call
+rejoin = "Rejoin"                  # shown after a network drop
 
 # Texts Meet shows while we present (any one is enough).
 presenting_texts = ["You are presenting", "You're presenting", "Stop presenting"]

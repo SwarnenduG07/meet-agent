@@ -50,11 +50,8 @@ impl Pointer {
             .with_context(|| format!("no box in the brain's answer: {answer:?}"))
     }
 
-    /// Screenshot, find `target`, draw the ring for `seconds`. Returns where.
-    ///
-    /// # Errors
-    /// Fails when the screenshot or the lookup fails.
-    pub async fn point_at(&self, brain: &Brain, target: &str, seconds: f64) -> Result<Rect> {
+    /// Screenshot (shrunk for speed) and find `target` on the shared display.
+    async fn find(&self, brain: &Brain, target: &str) -> Result<Rect> {
         std::fs::create_dir_all(&self.shots)?;
         let shot = self
             .shots
@@ -66,6 +63,30 @@ impl Pointer {
         if !screen::plausible(rect, &self.info) {
             bail!("{target:?} not found on screen (got an implausible box {grid:?})");
         }
+        Ok(rect)
+    }
+
+    /// Finds `label` on screen and clicks its centre.
+    ///
+    /// # Errors
+    /// Fails when it can't be found or clicked.
+    pub async fn click_on(&self, brain: &Brain, label: &str) -> Result<Rect> {
+        let rect = self.find(brain, label).await?;
+        screen::click(
+            &self.overlay,
+            self.display,
+            rect.x + rect.w / 2.0,
+            rect.y + rect.h / 2.0,
+        )?;
+        Ok(rect)
+    }
+
+    /// Screenshot, find `target`, draw the ring for `seconds`. Returns where.
+    ///
+    /// # Errors
+    /// Fails when the screenshot or the lookup fails.
+    pub async fn point_at(&self, brain: &Brain, target: &str, seconds: f64) -> Result<Rect> {
+        let rect = self.find(brain, target).await?;
         screen::spotlight(&self.overlay, self.display, rect, seconds)?;
         Ok(rect)
     }

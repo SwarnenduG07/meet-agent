@@ -1,7 +1,10 @@
 //! The orchestrator: one state at a time, only the actions that state allows, and
 //! the presentation plan. It drives the Meet call; the conversation loop talks.
 
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use meet::call::Call;
@@ -9,7 +12,8 @@ use serde_json::json;
 
 use crate::{
     conversation::{Control, Director, Flow, Tools, log},
-    plan::{Plan, SharePolicy},
+    demo,
+    plan::{Plan, SharePolicy, Step},
     screen_tools::Pointer,
     timeline::Timeline,
 };
@@ -90,6 +94,11 @@ pub struct Orchestrator {
     pub spotlight_secs: f64,
     /// A `point:` target waiting to be looked up.
     point_next: Option<String>,
+    /// Demo steps waiting to run for the section that just started.
+    steps_next: Vec<Step>,
+    /// When the in-call controls disappeared (network drop or the call ended).
+    away_since: Option<Instant>,
+    last_health_check: Instant,
     /// Section being presented and the next sentence of its script.
     section: usize,
     sentence: usize,
@@ -119,6 +128,9 @@ impl Orchestrator {
             pointer: None,
             spotlight_secs: 5.0,
             point_next: None,
+            steps_next: Vec::new(),
+            away_since: None,
+            last_health_check: Instant::now(),
             section: 0,
             sentence: 0,
             paused_at: None,
@@ -206,6 +218,7 @@ impl Orchestrator {
                 json!({ "index": self.section, "title": s.title }),
             );
             self.point_next.clone_from(&s.point);
+            self.steps_next.clone_from(&s.steps);
         }
         self.show_current();
     }
@@ -221,17 +234,22 @@ impl Orchestrator {
         }
     }
 
-    /// Looks for the section's `point:` target in the background and rings it.
-    fn point_in_background(&mut self, tools: &Tools<'_>) {
-        let (Some(target), Some(pointer)) = (self.point_next.take(), self.pointer.clone()) else {
-            return;
-        };
-        if !self.sharing {
+    /// Runs the section's demo steps, then rings its `point:` target, in the
+    /// background so narration and listening carry on.
+    fn section_background(&mut self, tools: &Tools<'_>) {
+        let steps = std::mem::take(&mut self.steps_next);
+        let target = self.point_next.take().filter(|_| self.sharing);
+        if steps.is_empty() && target.is_none() {
             return;
         }
         let brain = Arc::clone(tools.brain);
+        let pointer = self.pointer.clone();
         let secs = self.spotlight_secs;
         tokio::spawn(async move {
+            demo::run(steps, Arc::clone(&brain), pointer.clone()).await;
+            let (Some(target), Some(pointer)) = (target, pointer) else {
+                return;
+            };
             match pointer.point_at(&brain, &target, secs).await {
                 Ok(r) => log(
                     "point",
@@ -243,6 +261,43 @@ impl Orchestrator {
                 Err(e) => log("point", &format!("couldn't point at {target:?}: {e}")),
             }
         });
+    }
+
+    /// Checks about once a second that the call and the brain are alive.
+    /// A call that's gone for 10 s (after trying Rejoin) ends the meeting; a
+    /// crashed brain is restarted while the agent asks for a moment.
+    async fn check_health(&mut self, tools: &Tools<'_>) -> Result<Flow> {
+        if self.last_health_check.elapsed() < Duration::from_secs(1) {
+            return Ok(Flow::Continue);
+        }
+        self.last_health_check = Instant::now();
+        if let Some(call) = &self.call {
+            if call.in_call().await {
+                if self.away_since.take().is_some() {
+                    log("meet", "back in the call");
+                }
+            } else {
+                let since = *self.away_since.get_or_insert_with(Instant::now);
+                if call.rejoin().await {
+                    log("meet", "connection dropped; clicked Rejoin");
+                }
+                if since.elapsed() >= Duration::from_secs(10) {
+                    log("meet", "the call ended or the agent was removed");
+                    self.timeline.record("call_ended", json!({}));
+                    self.left = true;
+                    return Ok(Flow::Stop);
+                }
+            }
+        }
+        if !tools.brain.is_alive() {
+            log("brain", "the brain stopped; restarting it");
+            self.timeline.record("brain_restart", json!({}));
+            tools.voice.say("Sorry, give me one moment.").await?;
+            tools.brain.restart().await?;
+            tools.brain.warm_up(&self.plan.context).await?;
+            log("brain", "back");
+        }
+        Ok(Flow::Continue)
     }
 
     /// Queues the next sentence of the script when the previous one is nearly done.
@@ -411,17 +466,12 @@ impl Director for Orchestrator {
     }
 
     async fn tick(&mut self, tools: &Tools<'_>, busy: bool) -> Result<Flow> {
-        if let Some(call) = &self.call
-            && !call.in_call().await
-        {
-            log("meet", "the call ended or the agent was removed");
-            self.timeline.record("call_ended", json!({}));
-            self.left = true;
+        if self.check_health(tools).await? == Flow::Stop {
             return Ok(Flow::Stop);
         }
         match self.state {
             State::Presenting if !busy => {
-                self.point_in_background(tools);
+                self.section_background(tools);
                 self.present_step(tools).await?;
             }
             // Someone made a sound but asked nothing: carry on after a moment.

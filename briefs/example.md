@@ -15,6 +15,7 @@ an AI agent builds and runs the workflow for them.
 
 ### 1. What Flowline does
 show: https://example.com
+do: wait 1
 - Users describe an automation in plain English.
 - An AI agent builds the workflow, tests it in a sandbox, and runs it.
 

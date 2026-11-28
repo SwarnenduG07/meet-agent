@@ -79,6 +79,11 @@ pub trait Director {
     }
 }
 
+/// Longest wait for the brain's first sentence before giving up on a turn.
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(15);
+/// Said when the brain fails or is too slow, instead of going silent.
+const FALLBACK: &str = "Sorry, I didn't catch that. Could you say it again?";
+
 /// Whisper's usual output for noise or silence.
 const NOISE: [&str; 5] = ["Thank you.", "Thanks for watching!", "you", "Bye.", "."];
 
@@ -189,7 +194,16 @@ pub async fn run<D: Director>(
                 }
             },
             event = next_event(&mut current) => on_brain_event(&tools, director, &mut current, &mut pending, event).await?,
-            _ = tick.tick() => director.tick(&tools, current.is_some()).await?,
+            _ = tick.tick() => {
+                if current.as_ref().is_some_and(|t| !t.spoke && t.asked.elapsed() > ANSWER_TIMEOUT) {
+                    if let Some(t) = current.take() {
+                        brain.cancel(t.id);
+                    }
+                    log("brain", "no answer within 15 s; asking to repeat");
+                    voice.say(FALLBACK).await?;
+                }
+                director.tick(&tools, current.is_some()).await?
+            }
             Some(control) = controls.recv() => director.control(control, &tools).await?,
         };
         if flow == Flow::Stop || (opts.stop_at_end_of_input && input_done && current.is_none()) {
@@ -250,7 +264,10 @@ async fn on_brain_event<D: Director>(
         }
         other => {
             log("brain", &format!("{other:?}"));
-            *current = None;
+            let spoke = current.take().is_some_and(|t| t.spoke);
+            if matches!(other, Some(Event::Error { .. }) | None) && !spoke {
+                tools.voice.say(FALLBACK).await?;
+            }
             Ok(Flow::Continue)
         }
     }

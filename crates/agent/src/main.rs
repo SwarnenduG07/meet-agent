@@ -3,6 +3,7 @@
 mod ask;
 mod config;
 mod conversation;
+mod demo;
 mod doctor;
 mod join;
 mod listen;

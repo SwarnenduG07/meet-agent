@@ -1,6 +1,7 @@
 // meet-agent overlay helper.
 //   overlay screens                      -> JSON list of displays (points, top-left origin)
 //   overlay ring X Y W H SECONDS [N]     -> draws a ring on display N (1-based) for SECONDS
+//   overlay click X Y [N]                -> left-click at X,Y on display N (needs Accessibility)
 import AppKit
 
 let args = CommandLine.arguments
@@ -22,10 +23,24 @@ if args.count >= 2 && args[1] == "screens" {
     exit(0)
 }
 
+if args.count >= 4 && args[1] == "click", let x = Double(args[2]), let y = Double(args[3]) {
+    let n = args.count >= 5 ? max(0, (Int(args[4]) ?? 1) - 1) : 0
+    let s = n < screens.count ? screens[n] : screens[0]
+    let origin = topLeftFrame(s)
+    // CoreGraphics uses the same top-left global coordinates.
+    let p = CGPoint(x: origin.minX + x, y: origin.minY + y)
+    let src = CGEventSource(stateID: .hidSystemState)
+    for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
+        CGEvent(mouseEventSource: src, mouseType: type, mouseCursorPosition: p, mouseButton: .left)?.post(tap: .cghidEventTap)
+        usleep(60_000)
+    }
+    exit(0)
+}
+
 guard args.count >= 7, args[1] == "ring",
       let x = Double(args[2]), let y = Double(args[3]),
       let w = Double(args[4]), let h = Double(args[5]), let secs = Double(args[6]) else {
-    FileHandle.standardError.write("usage: overlay screens | overlay ring X Y W H SECONDS [DISPLAY]\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: overlay screens | ring X Y W H SECONDS [DISPLAY] | click X Y [DISPLAY]\n".data(using: .utf8)!)
     exit(2)
 }
 let index = args.count >= 8 ? max(0, (Int(args[7]) ?? 1) - 1) : 0
