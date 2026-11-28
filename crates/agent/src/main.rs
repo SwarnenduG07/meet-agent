@@ -10,6 +10,7 @@ mod login;
 mod orchestrator;
 mod plan;
 mod run;
+mod screen_tools;
 mod timeline;
 mod voice;
 
@@ -56,6 +57,13 @@ enum Cmd {
         link: String,
         #[arg(long, default_value = "briefs/example.md")]
         brief: PathBuf,
+    },
+    /// Find something on screen and ring it (or, with --image, just locate it there).
+    Point {
+        target: String,
+        /// Look in this image instead of taking a screenshot.
+        #[arg(long)]
+        image: Option<PathBuf>,
     },
     /// Ask the brain one question using a brief (developer test, no audio).
     Ask {
@@ -140,6 +148,9 @@ fn main() -> Result<()> {
             };
             tokio::runtime::Runtime::new()?.block_on(run::run(&cfg, opts))
         }
+        Cmd::Point { target, image } => {
+            tokio::runtime::Runtime::new()?.block_on(point(&cfg, &target, image))
+        }
         Cmd::Ask { question, brief } => {
             tokio::runtime::Runtime::new()?.block_on(ask::run(&cfg, &question, &brief))
         }
@@ -179,4 +190,33 @@ fn main() -> Result<()> {
             tokio::runtime::Runtime::new()?.block_on(run::run(&cfg, opts))
         }
     }
+}
+
+async fn point(cfg: &config::Config, target: &str, image: Option<PathBuf>) -> Result<()> {
+    let brain = brain_client::Brain::start(&cfg.brain()).await?;
+    let t = std::time::Instant::now();
+    let result = if let Some(image) = image {
+        screen_tools::Pointer::locate(&brain, &image, target)
+            .await
+            .map(|b| {
+                println!(
+                    "{target:?} is at {b:?} on the 0-1000 grid ({:.1}s)",
+                    t.elapsed().as_secs_f32()
+                );
+            })
+    } else {
+        let shots = std::env::temp_dir().join("meet-agent");
+        let pointer = screen_tools::Pointer::new(cfg.screen.display, &shots)?;
+        pointer
+            .point_at(&brain, target, cfg.screen.spotlight_secs)
+            .await
+            .map(|r| {
+                println!(
+                    "ringed {target:?} at {r:?} ({:.1}s)",
+                    t.elapsed().as_secs_f32()
+                );
+            })
+    };
+    brain.shutdown().await;
+    result
 }

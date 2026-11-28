@@ -3,6 +3,7 @@
 
 use std::{
     path::PathBuf,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -17,6 +18,7 @@ use crate::{
     listen::read_wav_16k,
     orchestrator::Orchestrator,
     plan::{Plan, SharePolicy, sentences},
+    screen_tools::Pointer,
     timeline::Timeline,
     voice::{self, Input, Voice},
 };
@@ -67,6 +69,7 @@ pub async fn run(cfg: &Config, opts: Options) -> Result<()> {
 
     let t = Instant::now();
     let (brain, voice, mut ears) = start(cfg, &plan.context, &opts).await?;
+    let brain = Arc::new(brain);
     log(
         "prepare",
         &format!("models ready in {:.1}s", t.elapsed().as_secs_f32()),
@@ -103,6 +106,7 @@ pub async fn run(cfg: &Config, opts: Options) -> Result<()> {
     voice.say(&greeting).await?;
     let start_presenting = plan.share == SharePolicy::AtStart && !plan.sections.is_empty();
     let owner = cfg.brain.owner.clone();
+    let pointer = pointer(cfg, &timeline.dir);
     let mut director = Orchestrator::new(
         call,
         plan,
@@ -111,6 +115,8 @@ pub async fn run(cfg: &Config, opts: Options) -> Result<()> {
         cfg.audio.agent_output.clone(),
         cfg.audio.your_mic.clone(),
     );
+    director.pointer = pointer;
+    director.spotlight_secs = cfg.screen.spotlight_secs;
     if start_presenting {
         voice
             .say("Let me share my screen and walk you through it.")
@@ -196,6 +202,17 @@ async fn start(cfg: &Config, context: &str, opts: &Options) -> Result<(Brain, Vo
         &format!("hearing {}, speaking on {:?}", ears.device, voice.outputs()),
     );
     Ok((brain, voice, ears))
+}
+
+/// The screen pointer, or `None` (logged) when the helper can't be built.
+fn pointer(cfg: &Config, run_dir: &std::path::Path) -> Option<Arc<Pointer>> {
+    match Pointer::new(cfg.screen.display, &run_dir.join("screens")) {
+        Ok(p) => Some(Arc::new(p)),
+        Err(e) => {
+            log("screen", &format!("pointing disabled: {e}"));
+            None
+        }
+    }
 }
 
 /// Before the meeting: the brain writes what to say for each section.

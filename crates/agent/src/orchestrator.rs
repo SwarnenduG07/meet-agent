@@ -1,7 +1,7 @@
 //! The orchestrator: one state at a time, only the actions that state allows, and
 //! the presentation plan. It drives the Meet call; the conversation loop talks.
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use anyhow::Result;
 use meet::call::Call;
@@ -10,6 +10,7 @@ use serde_json::json;
 use crate::{
     conversation::{Control, Director, Flow, Tools, log},
     plan::{Plan, SharePolicy},
+    screen_tools::Pointer,
     timeline::Timeline,
 };
 
@@ -84,6 +85,11 @@ pub struct Orchestrator {
     pub state: State,
     pub sharing: bool,
     pub left: bool,
+    /// Rings what each section's `point:` names; `None` when unavailable.
+    pub pointer: Option<Arc<Pointer>>,
+    pub spotlight_secs: f64,
+    /// A `point:` target waiting to be looked up.
+    point_next: Option<String>,
     /// Section being presented and the next sentence of its script.
     section: usize,
     sentence: usize,
@@ -110,6 +116,9 @@ impl Orchestrator {
             state: State::Listening,
             sharing: false,
             left: false,
+            pointer: None,
+            spotlight_secs: 5.0,
+            point_next: None,
             section: 0,
             sentence: 0,
             paused_at: None,
@@ -196,6 +205,7 @@ impl Orchestrator {
                 "section",
                 json!({ "index": self.section, "title": s.title }),
             );
+            self.point_next.clone_from(&s.point);
         }
         self.show_current();
     }
@@ -209,6 +219,30 @@ impl Orchestrator {
         if self.section < self.plan.sections.len() {
             self.begin_section();
         }
+    }
+
+    /// Looks for the section's `point:` target in the background and rings it.
+    fn point_in_background(&mut self, tools: &Tools<'_>) {
+        let (Some(target), Some(pointer)) = (self.point_next.take(), self.pointer.clone()) else {
+            return;
+        };
+        if !self.sharing {
+            return;
+        }
+        let brain = Arc::clone(tools.brain);
+        let secs = self.spotlight_secs;
+        tokio::spawn(async move {
+            match pointer.point_at(&brain, &target, secs).await {
+                Ok(r) => log(
+                    "point",
+                    &format!(
+                        "ringed {target:?} at ({:.0}, {:.0}) {:.0}x{:.0}",
+                        r.x, r.y, r.w, r.h
+                    ),
+                ),
+                Err(e) => log("point", &format!("couldn't point at {target:?}: {e}")),
+            }
+        });
     }
 
     /// Queues the next sentence of the script when the previous one is nearly done.
@@ -386,7 +420,10 @@ impl Director for Orchestrator {
             return Ok(Flow::Stop);
         }
         match self.state {
-            State::Presenting if !busy => self.present_step(tools).await?,
+            State::Presenting if !busy => {
+                self.point_in_background(tools);
+                self.present_step(tools).await?;
+            }
             // Someone made a sound but asked nothing: carry on after a moment.
             State::Paused
                 if !busy && self.paused_at.is_some_and(|t| t.elapsed().as_secs() >= 6) =>

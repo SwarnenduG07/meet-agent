@@ -17,6 +17,7 @@ pub struct Config {
     pub brain: Brain,
     pub meet: Meet,
     pub speech: Speech,
+    pub screen: Screen,
     /// Role → model file in the Hugging Face cache.
     pub models: BTreeMap<String, ModelFile>,
 }
@@ -25,6 +26,14 @@ pub struct Config {
 pub struct ModelFile {
     pub repo: String,
     pub file: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Screen {
+    /// The display Meet shares, 1-based ("Screen 1" in Chrome = 1).
+    pub display: usize,
+    /// How long the spotlight ring stays, in seconds.
+    pub spotlight_secs: f64,
 }
 
 #[derive(Debug, Deserialize)]

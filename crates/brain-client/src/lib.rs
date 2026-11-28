@@ -42,7 +42,7 @@ type Waiters = Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<Event>>>>;
 
 /// A running brain server and the connection to it.
 pub struct Brain {
-    child: Child,
+    child: tokio::sync::Mutex<Child>,
     outgoing: mpsc::UnboundedSender<Command>,
     waiters: Waiters,
     next_id: AtomicU64,
@@ -100,7 +100,7 @@ impl Brain {
         let reader = tokio::spawn(route_events(stream, Arc::clone(&waiters)));
 
         Ok(Self {
-            child,
+            child: tokio::sync::Mutex::new(child),
             outgoing,
             waiters,
             next_id: AtomicU64::new(1),
@@ -213,26 +213,27 @@ impl Brain {
     }
 
     /// True while the server process is running.
-    pub fn is_alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
+    pub async fn is_alive(&self) -> bool {
+        matches!(self.child.lock().await.try_wait(), Ok(None))
     }
 
-    /// Stops the server; its memory is freed.
-    pub async fn shutdown(mut self) {
+    /// Stops the server; its memory is freed. Safe to call from a shared handle.
+    pub async fn shutdown(&self) {
         for t in &self.tasks {
             t.abort();
         }
-        if let Some(pid) = self.child.id() {
+        let mut child = self.child.lock().await;
+        if let Some(pid) = child.id() {
             let _ = tokio::process::Command::new("kill")
                 .args(["-TERM", &format!("-{pid}")])
                 .status()
                 .await;
         }
-        if tokio::time::timeout(Duration::from_secs(3), self.child.wait())
+        if tokio::time::timeout(Duration::from_secs(3), child.wait())
             .await
             .is_err()
         {
-            let _ = self.child.kill().await;
+            let _ = child.kill().await;
         }
     }
 }

@@ -37,6 +37,10 @@ smart_turn = { repo = "pipecat-ai/smart-turn-v3", file = "smart-turn-v3.2-cpu.on
 whisper = { repo = "ggerganov/whisper.cpp", file = "ggml-large-v3-turbo-q8_0.bin" }
 tts = { repo = "onnx-community/Kokoro-82M-v1.0-ONNX", file = "onnx/model.onnx" }
 
+[screen]
+display = 1                           # display Meet shares (1 = main); must match chrome.share_source
+spotlight_secs = 5.0                  # how long the pointing ring stays
+
 [speech]
 voice = "af_heart"                    # Kokoro voice file in voices/
 tts_threads = 8                       # CPU threads for Kokoro (8: ~0.5 s per sentence)

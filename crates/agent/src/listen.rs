@@ -61,7 +61,7 @@ pub async fn run(cfg: &Config, opts: Options) -> Result<()> {
         Brain::start(&brain_settings),
         voice::load(cfg, input, outputs, !opts.barge_in)
     );
-    let (brain, (voice, mut ears)) = (brain?, loaded?);
+    let (brain, (voice, mut ears)) = (std::sync::Arc::new(brain?), loaded?);
     brain.warm_up(&context).await?;
     log(
         "startup",

@@ -46,3 +46,7 @@ run brief *args:
 # Practise a brief locally: same flow, no Meet
 rehearse brief *args:
     cargo run -q --release -p agent -- run "{{brief}}" --rehearse {{args}}
+
+# Find something on screen and ring it, e.g. just point "Orchestrator"
+point target *args:
+    cargo run -q --release -p agent -- point "{{target}}" {{args}}

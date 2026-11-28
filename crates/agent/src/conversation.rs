@@ -1,7 +1,10 @@
 //! The talk loop shared by every mode: hear a turn, transcribe it, ask the brain,
 //! speak the streamed reply, and let a [`Director`] decide what it may do.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use audio::listener::Heard;
@@ -32,6 +35,8 @@ pub enum Control {
 
 /// What a director can use while acting.
 pub struct Tools<'a> {
+    /// Shared, so long jobs (like pointing at the screen) can run in the background.
+    pub brain: &'a Arc<Brain>,
     pub voice: &'a Voice,
 }
 
@@ -125,14 +130,14 @@ pub struct Options {
 
 /// Runs until the director says stop, Ctrl+C, or (optionally) the input ends.
 pub async fn run<D: Director>(
-    brain: &Brain,
+    brain: &Arc<Brain>,
     voice: &Voice,
     ears: &mut Ears,
     director: &mut D,
     mut controls: mpsc::UnboundedReceiver<Control>,
     opts: Options,
 ) -> Result<()> {
-    let tools = Tools { voice };
+    let tools = Tools { brain, voice };
     let mut current: Option<Turn> = None;
     let mut pending: Option<(String, Instant)> = None;
     let mut input_done = false;
